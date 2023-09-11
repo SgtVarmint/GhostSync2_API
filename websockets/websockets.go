@@ -9,7 +9,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type lobby struct {
+type Lobby struct {
 	LobbyName	string
 	ClientCount	int64
 	Clients		[]Client
@@ -20,13 +20,13 @@ type Client struct {
 	UserName	string			`json:"user_name"`
 }
 
-type UserConnect struct {
-	Event		string  `json:"event"`
-	LobbyName	string	`json:"lobby_name"`
-	UserName	string	`json:"user_name"`
+type WSEvent struct {
+	Event		string  	`json:"event"`
+	LobbyName	string		`json:"lobby_name"`
+	Data		[]string	`json:"data"`
 }
 
-var lobbyPool = make(map[string]*lobby)
+var lobbyPool = make(map[string]*Lobby)
 
 var upgrader = websocket.Upgrader {
 	ReadBufferSize:		1024,
@@ -54,30 +54,32 @@ func reader(conn *websocket.Conn) {
 			return
 		}
 
-		var WSEvent UserConnect
-		json.Unmarshal(msg, &WSEvent)
-	
-		switch WSEvent.Event {
+		var websocketEvent WSEvent
+		json.Unmarshal(msg, &websocketEvent)
+
+		var payload []byte
+		switch websocketEvent.Event {
 		case "userConnect":
-			addToClientPool(WSEvent, conn)
+			addToClientPool(websocketEvent, conn)
+			payload = getConnectedUserNames(websocketEvent)
 		case "userDisconnect":
-			removeFromClientPool(WSEvent.LobbyName)
+			removeFromClientPool(websocketEvent.LobbyName)
 		}
 
-		dispatchMsgToPool(WSEvent, msgType)
+		dispatchMsgToPool(websocketEvent, payload, msgType)
 	}
 }
 
-func addToClientPool(WSEvent UserConnect, conn *websocket.Conn) {
-	if lobbyPool[WSEvent.LobbyName] == nil {
-		createNewLobbyPool(WSEvent.LobbyName)
+func addToClientPool(event WSEvent, conn *websocket.Conn) {
+	if lobbyPool[event.LobbyName] == nil {
+		createNewLobbyPool(event.LobbyName)
 	}
-	
-	workingLobby := lobbyPool[WSEvent.LobbyName]
+
+	workingLobby := lobbyPool[event.LobbyName]
 
 	client := &Client {
 		Conn:		*conn,
-		UserName:	WSEvent.UserName,
+		UserName:	event.Data[0],
 	}
 	workingLobby.Clients = append(workingLobby.Clients, *client)
 	workingLobby.ClientCount += 1
@@ -90,26 +92,17 @@ func createNewLobbyPool(lobbyHash string) {
 		return
 	}
 
-	lobbyPool[lobbyHash] = &lobby{
+	lobbyPool[lobbyHash] = &Lobby{
 		LobbyName:		string(lobbyName),
 		ClientCount: 	0,
 	}
 }
 
-func removeFromClientPool(lobbyHash string) {
-	lobbyPool[lobbyHash].ClientCount -= 1
-}
-
-func dispatchMsgToPool(WSEvent UserConnect, msgType int) {
-	workingLobby := lobbyPool[WSEvent.LobbyName]
-
-	payload, err := json.Marshal(WSEvent)
-	if err != nil {
-		panic(err)
-	}
+func dispatchMsgToPool(websocketEvent WSEvent, payload []byte, msgType int) {
+	workingLobby := lobbyPool[websocketEvent.LobbyName]
 
 	for _, client := range workingLobby.Clients {
-		if err = client.Conn.WriteMessage(msgType, []byte(payload)); err != nil {
+		if err := client.Conn.WriteMessage(msgType, payload); err != nil {
 			log.Println(err)
 			return
 		}
