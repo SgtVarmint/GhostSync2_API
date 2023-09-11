@@ -12,7 +12,7 @@ import (
 type Lobby struct {
 	LobbyName	string
 	ClientCount	int64
-	Clients		[]Client
+	Clients		map[string]*Client
 }
 
 type Client struct {
@@ -63,9 +63,11 @@ func reader(conn *websocket.Conn) {
 			addToClientPool(websocketEvent, conn)
 			payload = getConnectedUserNames(websocketEvent)
 		case "userDisconnect":
-			removeFromClientPool(websocketEvent.LobbyName)
+			removeFromClientPool(websocketEvent.LobbyName, websocketEvent.Data[0])
+			payload = getConnectedUserNames(websocketEvent)
 		}
 
+		log.Println(lobbyPool[websocketEvent.LobbyName])
 		dispatchMsgToPool(websocketEvent, payload, msgType)
 	}
 }
@@ -81,7 +83,7 @@ func addToClientPool(event WSEvent, conn *websocket.Conn) {
 		Conn:		*conn,
 		UserName:	event.Data[0],
 	}
-	workingLobby.Clients = append(workingLobby.Clients, *client)
+	workingLobby.Clients[client.UserName] = client
 	workingLobby.ClientCount += 1
 }
 
@@ -95,6 +97,7 @@ func createNewLobbyPool(lobbyHash string) {
 	lobbyPool[lobbyHash] = &Lobby{
 		LobbyName:		string(lobbyName),
 		ClientCount: 	0,
+		Clients:		make(map[string]*Client),
 	}
 }
 
