@@ -23,6 +23,7 @@ type Client struct {
 type WSEvent struct {
 	Event		string  	`json:"event"`
 	LobbyName	string		`json:"lobby_name"`
+	LobbyHash	string
 	Data		[]string	`json:"data"`
 }
 
@@ -56,53 +57,52 @@ func reader(conn *websocket.Conn) {
 
 		var websocketEvent WSEvent
 		json.Unmarshal(msg, &websocketEvent)
+		websocketEvent.getLobbyHash()
 
-		var payload []byte
-		switch websocketEvent.Event {
-		case "userConnect":
-			addToClientPool(websocketEvent, conn)
-			payload = getConnectedUserNames(websocketEvent)
-		case "userDisconnect":
-			removeFromClientPool(websocketEvent.LobbyName, websocketEvent.Data[0])
-			payload = getConnectedUserNames(websocketEvent)
+		payload, err := ParseEvent(websocketEvent, conn)
+		if err != nil {
+			panic(err)
 		}
 
-		log.Println(lobbyPool[websocketEvent.LobbyName])
-		dispatchMsgToPool(websocketEvent, payload, msgType)
+		dispatchMsgToLobby(websocketEvent.LobbyHash, payload, msgType)
 	}
 }
 
-func addToClientPool(event WSEvent, conn *websocket.Conn) {
-	if lobbyPool[event.LobbyName] == nil {
-		createNewLobbyPool(event.LobbyName)
+func (event *WSEvent) getLobbyHash() {
+	event.LobbyHash = base64.StdEncoding.EncodeToString([]byte(event.LobbyName))
+} 
+
+func ParseEvent(websocketEvent WSEvent, conn *websocket.Conn) ([]byte, error){
+	var payload []byte
+	var err error
+
+	switch websocketEvent.Event {
+	case "userConnect":
+		websocketEvent.AddToClientPool(conn)
+		payload, err = websocketEvent.getConnectedUserNames()
+	case "userDisconnect":
+		websocketEvent.removeFromClientPool()
+		payload, err = websocketEvent.getConnectedUserNames()
+	default:
+		payload, err = json.Marshal(websocketEvent)
+		if err != nil {
+			panic(err)
+		}
 	}
 
-	workingLobby := lobbyPool[event.LobbyName]
-
-	client := &Client {
-		Conn:		*conn,
-		UserName:	event.Data[0],
-	}
-	workingLobby.Clients[client.UserName] = client
-	workingLobby.ClientCount += 1
+	return payload, err
 }
 
-func createNewLobbyPool(lobbyHash string) {
-	lobbyName := make([]byte, base64.StdEncoding.DecodedLen(len(lobbyHash)))
-	_, err := base64.StdEncoding.Decode(lobbyName, []byte(lobbyHash))
-	if err != nil {
-		return
-	}
-
-	lobbyPool[lobbyHash] = &Lobby{
-		LobbyName:		string(lobbyName),
+func (event *WSEvent) CreateNewLobby() (*Lobby){
+	return &Lobby{
+		LobbyName:		event.LobbyName,
 		ClientCount: 	0,
 		Clients:		make(map[string]*Client),
 	}
 }
 
-func dispatchMsgToPool(websocketEvent WSEvent, payload []byte, msgType int) {
-	workingLobby := lobbyPool[websocketEvent.LobbyName]
+func dispatchMsgToLobby(lobbyHash string, payload []byte, msgType int) {
+	workingLobby := lobbyPool[lobbyHash]
 
 	for _, client := range workingLobby.Clients {
 		if err := client.Conn.WriteMessage(msgType, payload); err != nil {
