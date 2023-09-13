@@ -3,7 +3,7 @@ package authentication
 import (
 	"net/http"
 	"encoding/json"
-	"fmt"
+	"log"
 
 	"github.com/SgtVarmint/GhostSync2/config"
 )
@@ -12,7 +12,12 @@ type ValidAuth struct {
 	Status		string
 }
 
-func Authenticate(w http.ResponseWriter, r *http.Request, config config.Config) {
+func Authenticate(r *http.Request) ([]byte){
+	config, err := config.ParseConfig()
+	if err != nil {
+		log.Println(err)
+	}
+
 	queryStrings := r.URL.Query()
 
 	var payload *ValidAuth
@@ -24,9 +29,13 @@ func Authenticate(w http.ResponseWriter, r *http.Request, config config.Config) 
 
 	json, err := json.Marshal(payload)
 	if err != nil {
-		fmt.Errorf("Error: ", err)
+		log.Print(err)
 	}
 
+	return json
+}
+
+func SendAuthResponse(w http.ResponseWriter, authJson []byte) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(json)
+	w.Write(authJson)
 }
